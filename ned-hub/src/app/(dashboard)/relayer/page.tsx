@@ -1,112 +1,30 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
+import { PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import toast from "react-hot-toast";
+import { connection } from "@/lib/solana";
 import Navbar from "@/components/Navbar";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-interface RelayerInfo {
-  address: string;
-  balance: number;
+interface RelayerSettings {
+  is_active: boolean;
+  daily_limit: number;
+  alert_threshold: number;
+  updated_at?: string;
 }
 
-interface SpendHistoryItem {
+interface RelayerLogItem {
   id: string;
-  time: string;
-  event: string;
-  icon: string;
-  category: "mint" | "otp" | "username" | "wallet" | "reward";
-  recipient: string;
-  wallet: string;
-  spentSOL: string;
-  spentUSD: string;
-  status: "success" | "pending";
-  txHash: string;
+  wallet_address: string;
+  username?: string | null;
+  action: string;
+  amount_sol: number;
+  signature: string;
+  created_at: string;
 }
-
-// ─── Mock Spending History (Blockchain data translated to non-tech language) ───
-
-const initialSpendHistory: SpendHistoryItem[] = [
-  {
-    id: "tx-1",
-    time: "19:48 - Vừa xong",
-    event: "Tài trợ phí Mint NFT Khách tham quan",
-    icon: "🎟️",
-    category: "mint",
-    recipient: "alex.ned",
-    wallet: "C8RLqFH5CHDWoLFrz8FbDPFyRfpvgjDy9Cft9L3HWXdm",
-    spentSOL: "-0.000010 SOL",
-    spentUSD: "~$0.0015",
-    status: "success",
-    txHash: "5KtPn4W8R2mE9V7bZxQ1yJ8kLsD4cT2aX6uB3mF9vG7e",
-  },
-  {
-    id: "tx-2",
-    time: "18:30 - Hôm nay",
-    event: "Tài trợ phí Đăng ký Tên định danh (alex.ned)",
-    icon: "👤",
-    category: "username",
-    recipient: "alex.ned",
-    wallet: "C8RLqFH5CHDWoLFrz8FbDPFyRfpvgjDy9Cft9L3HWXdm",
-    spentSOL: "-0.000005 SOL",
-    spentUSD: "~$0.0007",
-    status: "success",
-    txHash: "4JnRm9K3L5mP8Q2bXxV1yT7aDsC4eF2aZ6uB3mG8wH9e",
-  },
-  {
-    id: "tx-3",
-    time: "17:15 - Hôm nay",
-    event: "Tài trợ phí Xác thực OTP Phone",
-    icon: "🔐",
-    category: "otp",
-    recipient: "sarah.sol",
-    wallet: "9xPq2KLaM5nF8Q2bXxV1yT7aDsC4eF2aZ6uB3mG8wH9e",
-    spentSOL: "-0.000005 SOL",
-    spentUSD: "~$0.0007",
-    status: "success",
-    txHash: "3LmRn8K2L4mP7Q1bXxV0yT6aDsC3eF1aZ5uB2mG7wH8e",
-  },
-  {
-    id: "tx-4",
-    time: "15:42 - Hôm nay",
-    event: "Tài trợ phí Khởi tạo Tài khoản Ví Gasless",
-    icon: "⚡",
-    category: "wallet",
-    recipient: "david.ned",
-    wallet: "F5t2M9nPKLaM5nF8Q2bXxV1yT7aDsC4eF2aZ6uB3mG8w",
-    spentSOL: "-0.000008 SOL",
-    spentUSD: "~$0.0012",
-    status: "success",
-    txHash: "2KmQn7K1L3mP6Q0bXxU9yT5aDsC2eF0aZ4uB1mG6wH7e",
-  },
-  {
-    id: "tx-5",
-    time: "14:10 - Hôm nay",
-    event: "Tài trợ phí Nhận Phần thưởng Mini-App Tech4life",
-    icon: "🎁",
-    category: "reward",
-    recipient: "vietnam.web3",
-    wallet: "3Rt1M7nPKLaM5nF8Q2bXxV1yT7aDsC4eF2aZ6uB3mG8w",
-    spentSOL: "-0.000005 SOL",
-    spentUSD: "~$0.0007",
-    status: "success",
-    txHash: "1JmPn6K0L2mP5Q9bXxT8yT4aDsC1eE9aZ3uB0mG5wH6e",
-  },
-  {
-    id: "tx-6",
-    time: "11:25 - Hôm nay",
-    event: "Tài trợ phí Mint NFT Khách tham quan",
-    icon: "🎟️",
-    category: "mint",
-    recipient: "techlover.sol",
-    wallet: "8Yt2M7nPKLaM5nF8Q2bXxV1yT7aDsC4eF2aZ6uB3mG8w",
-    spentSOL: "-0.000010 SOL",
-    spentUSD: "~$0.0015",
-    status: "success",
-    txHash: "9ImOn5J9L1mP4Q8bXxS7yT3aDsC0eD8aZ2uA9mG4wH5e",
-  },
-];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -116,61 +34,136 @@ function truncateAddress(addr: string): string {
   return addr.slice(0, 8) + "..." + addr.slice(-8);
 }
 
+function formatDate(isoString: string): string {
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return isoString;
+
+    const hours = String(d.getHours()).padStart(2, "0");
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+
+    return `${hours}:${minutes} - ${day}/${month}/${year}`;
+  } catch {
+    return isoString;
+  }
+}
+
+// Action translator to non-tech friendly descriptions
+function getActionDetails(action: string) {
+  const norm = (action || "").toLowerCase();
+  if (norm.includes("mint")) {
+    return { title: "Tài trợ phí Mint NFT", icon: "🎟️", category: "mint" };
+  }
+  if (norm.includes("otp") || norm.includes("verify")) {
+    return { title: "Tài trợ phí Xác thực OTP Phone", icon: "🔐", category: "otp" };
+  }
+  if (norm.includes("name") || norm.includes("username")) {
+    return { title: "Tài trợ phí Đăng ký Tên định danh", icon: "👤", category: "username" };
+  }
+  if (norm.includes("wallet") || norm.includes("auth")) {
+    return { title: "Tài trợ phí Khởi tạo Tài khoản Ví Gasless", icon: "⚡", category: "wallet" };
+  }
+  return { title: "Tài trợ phí Giao dịch On-chain", icon: "🎁", category: "other" };
+}
+
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export default function RelayerPage() {
-  const [relayer, setRelayer] = useState<RelayerInfo | null>(null);
+  const [address, setAddress] = useState("b7TFMuVZzZneuHSMuoWiV3d52yRF7pLTLVF7HDKNWqz");
+  const [balance, setBalance] = useState<number>(19.9998);
+  const [logs, setLogs] = useState<RelayerLogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Settings State
+  const [isActive, setIsActive] = useState<boolean>(true);
+  const [dailyLimit, setDailyLimit] = useState<number>(20);
+  const [alertThreshold, setAlertThreshold] = useState<number>(2.0);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Modal Top-up State
   const [isTopUpModalOpen, setIsTopUpModalOpen] = useState(false);
   const [copiedAddress, setCopiedAddress] = useState(false);
 
-  // Airdrop State & Toast
+  // Airdrop State
   const [airdropping, setAirdropping] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Control Hub Settings State
-  const [sponsorLimit, setSponsorLimit] = useState<number>(20); // 0 - 50 SOL slider
-  const [isSponsoringActive, setIsSponsoringActive] = useState<boolean>(true); // Kill switch toggle
-  const [warningThreshold, setWarningThreshold] = useState<number>(2.0); // Low balance alert
-  const [isSavedNotice, setIsSavedNotice] = useState(false);
-
-  // Spending History Filter
+  // Filter for Logs
   const [historyFilter, setHistoryFilter] = useState<string>("all");
 
-  const relayerAddress = relayer?.address || "b7TFMuVZzZneuHSMuoWiV3d52yRF7pLTLVF7HDKNWqz";
-  const balance = relayer?.balance ?? 19.9998;
-  const isLowBalance = balance < warningThreshold;
-  const capacityPercent = Math.min(100, Math.max(0, Math.round((balance / sponsorLimit) * 100)));
-  const solPriceUSD = 145.2;
-  const usdValue = (balance * solPriceUSD).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-
-  // Fetch Relayer Balance
-  const fetchRelayer = useCallback(async () => {
+  // 1. Fetch Relayer Data & Settings on Mount
+  const fetchRelayerData = useCallback(async () => {
     try {
       setRefreshing(true);
-      const res = await fetch("/api/relayer-balance");
-      if (!res.ok) throw new Error("Failed to fetch");
-      const data = await res.json();
-      setRelayer(data);
-    } catch {
-      setRelayer((prev) => prev || { address: "b7TFMuVZzZneuHSMuoWiV3d52yRF7pLTLVF7HDKNWqz", balance: 19.9998 });
+      
+      // Fetch both settings and logs/balance in parallel
+      const [settingsRes, relayerRes] = await Promise.all([
+        fetch("/api/relayer-settings"),
+        fetch("/api/relayer"),
+      ]);
+
+      if (settingsRes.ok) {
+        const settingsData = await settingsRes.json();
+        if (settingsData.success && settingsData.data) {
+          setIsActive(settingsData.data.is_active ?? true);
+          setDailyLimit(Number(settingsData.data.daily_limit ?? 20));
+          setAlertThreshold(Number(settingsData.data.alert_threshold ?? 2.0));
+        }
+      }
+
+      if (relayerRes.ok) {
+        const relayerData = await relayerRes.json();
+        if (relayerData.success) {
+          if (relayerData.address) setAddress(relayerData.address);
+          if (typeof relayerData.balance === "number") setBalance(relayerData.balance);
+          if (Array.isArray(relayerData.logs)) setLogs(relayerData.logs);
+        }
+      }
+    } catch (err) {
+      console.error("Lỗi khi tải dữ liệu Relayer:", err);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
+  // Poll balance and logs every 10s
   useEffect(() => {
-    fetchRelayer();
-    const interval = setInterval(fetchRelayer, 15000);
+    fetchRelayerData();
+    const interval = setInterval(fetchRelayerData, 10000);
     return () => clearInterval(interval);
-  }, [fetchRelayer]);
+  }, [fetchRelayerData]);
+
+  // 2. Handle Save Settings to /api/relayer-settings on "Lưu ngay" click
+  const handleSaveSettings = async () => {
+    try {
+      setIsSaving(true);
+      const res = await fetch("/api/relayer-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          is_active: isActive,
+          daily_limit: dailyLimit,
+          alert_threshold: alertThreshold,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Không thể lưu cấu hình");
+      }
+
+      toast.success("Đã lưu cấu hình Relayer thành công!", { id: "save-settings-toast" });
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "Đã xảy ra lỗi khi lưu";
+      toast.error(`Lưu cấu hình thất bại: ${errorMessage}`, { id: "save-settings-toast" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   // Copy helper
   const handleCopy = (text: string) => {
@@ -179,60 +172,81 @@ export default function RelayerPage() {
     setTimeout(() => setCopiedAddress(false), 2000);
   };
 
-  // Trigger Airdrop
+  // 3. Airdrop Devnet Function với try-catch, confirmTransaction và xử lý lỗi Rate-limit 429
   const handleAirdrop = async () => {
     try {
       setAirdropping(true);
-      const res = await fetch("/api/relayer-airdrop", { method: "POST" });
-      const data = await res.json();
-      if (data.success) {
-        setRelayer((prev) => ({
-          address: relayerAddress,
-          balance: data.balance || (prev ? prev.balance + 1 : 20.9998),
-        }));
-        setToastMessage("💧 Airdrop 1 SOL Devnet thành công! Số dư đã được cập nhật.");
-      } else {
-        setToastMessage("⚠️ " + (data.error || "Không thể thực hiện Airdrop lúc này"));
+      // 1. Hiển thị Toast Loading chờ xử lý
+      toast.loading("Đang yêu cầu Airdrop từ Solana Devnet...", { id: "airdrop-toast" });
+
+      // 2. Gọi API requestAirdrop
+      const relayerPublicKey = new PublicKey(address || "b7TFMuVZzZneuHSMuoWiV3d52yRF7pLTLVF7HDKNWqz");
+      const signature = await connection.requestAirdrop(relayerPublicKey, 1 * LAMPORTS_PER_SOL);
+
+      // 3. BẮT BUỘC: Chờ mạng lưới xác nhận giao dịch (Confirm)
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+      const confirmation = await connection.confirmTransaction({
+        signature,
+        blockhash,
+        lastValidBlockHeight,
+      });
+
+      if (confirmation.value.err) {
+        throw new Error("Giao dịch Airdrop bị từ chối trên chuỗi.");
       }
-    } catch {
-      // Fallback optimistic bump
-      setRelayer((prev) => ({
-        address: relayerAddress,
-        balance: (prev?.balance || 19.9998) + 1.0,
-      }));
-      setToastMessage("💧 Đã nhận +1.0 SOL Devnet thành công!");
+
+      // 4. Nếu qua bước confirm, hiển thị Toast Thành công và fetch lại số dư
+      toast.success("Airdrop thành công! Đã cộng 1 SOL.", { id: "airdrop-toast" });
+      await fetchRelayerData(); // Gọi lại hàm cập nhật số dư hiển thị
+    } catch (error: any) {
+      // 5. Xử lý Catch Error và trích xuất đúng Message từ RPC
+      const errorMessage = error?.message || String(error) || "Đã xảy ra lỗi không xác định.";
+
+      // Bắt lỗi đặc thù Rate-limit 429 của Solana Faucet
+      if (
+        errorMessage.includes("429") ||
+        errorMessage.includes("Too Many Requests") ||
+        errorMessage.includes("limit") ||
+        errorMessage.includes("faucet has run dry") ||
+        errorMessage.includes("reached your airdrop limit")
+      ) {
+        toast.error(
+          "Vượt quá giới hạn Airdrop (Rate-limit 429). Faucet đã cạn hoặc bạn đã hết lượt hôm nay. Hãy thử lại sau!",
+          { id: "airdrop-toast", duration: 5000 }
+        );
+      } else {
+        // Các lỗi khác
+        toast.error(`Airdrop thất bại: ${errorMessage}`, {
+          id: "airdrop-toast",
+          duration: 5000,
+        });
+      }
     } finally {
       setAirdropping(false);
-      setTimeout(() => setToastMessage(null), 4000);
     }
   };
 
-  // Save Settings
-  const handleSaveSettings = () => {
-    setIsSavedNotice(true);
-    setTimeout(() => setIsSavedNotice(false), 2500);
-  };
+  const isLowBalance = balance < alertThreshold;
+  const capacityPercent = Math.min(100, Math.max(0, Math.round((balance / dailyLimit) * 100)));
+  const solPriceUSD = 145.2;
+  const usdValue = (balance * solPriceUSD).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 
-  // Filtered History
-  const filteredHistory = initialSpendHistory.filter((item) => {
+  // Filtered Logs
+  const filteredLogs = logs.filter((item) => {
     if (historyFilter === "all") return true;
-    return item.category === historyFilter;
+    const { category } = getActionDetails(item.action);
+    return category === historyFilter;
   });
 
   // QR Code URL for Top-up Modal
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${relayerAddress}&color=14F195&bgcolor=0F1629`;
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${address}&color=14F195&bgcolor=0F1629`;
 
   return (
     <div className="min-h-screen flex flex-col bg-[#0B0F19] text-[#F0F4FF] selection:bg-[#9945FF] selection:text-white">
       <Navbar />
-
-      {/* Floating Toast Notification */}
-      {toastMessage && (
-        <div className="fixed top-20 right-6 z-50 p-4 rounded-xl bg-[#1E293B] border border-[#14F195]/50 text-white shadow-2xl flex items-center gap-3 animate-bounce">
-          <span className="text-xl">✨</span>
-          <span className="text-xs font-bold">{toastMessage}</span>
-        </div>
-      )}
 
       <main className="flex-1 px-4 sm:px-8 py-6 max-w-[1480px] w-full mx-auto flex flex-col gap-6">
         {/* Page Top Header */}
@@ -244,11 +258,11 @@ export default function RelayerPage() {
               </h1>
               <span className="px-3 py-1 rounded-full text-xs font-bold bg-[#14F195]/15 text-[#14F195] border border-[#14F195]/30 flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#14F195] pulse-dot" />
-                Solana Devnet Active
+                Live RPC & Supabase Synced
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-1">
-              Trạm tài trợ phí gas tự động, cấu hình hạn mức tài trợ và giám sát chi tiêu on-chain
+              Trạm tài trợ phí gas tự động, cấu hình hạn mức ngân sách và giám sát chi tiêu on-chain
             </p>
           </div>
 
@@ -264,7 +278,7 @@ export default function RelayerPage() {
             </Link>
 
             <button
-              onClick={fetchRelayer}
+              onClick={fetchRelayerData}
               disabled={refreshing}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-white/5 hover:bg-white/10 border border-white/10 transition-all"
             >
@@ -277,7 +291,7 @@ export default function RelayerPage() {
               >
                 <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
               </svg>
-              <span>{refreshing ? "Đang tải..." : "Làm mới số dư"}</span>
+              <span>{refreshing ? "Đang tải..." : "Làm mới"}</span>
             </button>
           </div>
         </div>
@@ -286,7 +300,7 @@ export default function RelayerPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
           {/* 1. Khối Tài sản & Hành động (Bên trái, 50% width) */}
           <div className="ned-card ned-card-glow p-6 flex flex-col justify-between h-full relative overflow-hidden">
-            {/* Background ambient light */}
+            {/* Ambient Background Light */}
             <div
               className="absolute -top-16 -right-16 w-64 h-64 pointer-events-none rounded-full"
               style={{
@@ -306,7 +320,7 @@ export default function RelayerPage() {
                     Auto-Relay Enabled
                   </span>
                 </div>
-                <span className="text-[10px] text-slate-500 font-mono">N.E.D v2.5 Protocol</span>
+                <span className="text-[10px] text-slate-500 font-mono">Solana Devnet</span>
               </div>
 
               {/* ─── Web3 Bank Card Style ─── */}
@@ -320,15 +334,6 @@ export default function RelayerPage() {
                     : "0 10px 30px rgba(20, 241, 149, 0.2), inset 0 0 20px rgba(153, 69, 255, 0.15)",
                 }}
               >
-                {/* Holographic lines decoration */}
-                <div
-                  className="absolute inset-0 pointer-events-none opacity-20"
-                  style={{
-                    backgroundImage:
-                      "radial-gradient(ellipse at top left, #14F195 0%, transparent 50%), radial-gradient(ellipse at bottom right, #9945FF 0%, transparent 50%)",
-                  }}
-                />
-
                 {/* Card Top: EMV Chip & Contactless */}
                 <div className="relative z-10 flex items-center justify-between mb-4">
                   {/* Gold EMV Chip */}
@@ -362,7 +367,7 @@ export default function RelayerPage() {
                 {/* Card Middle: Super Large SOL Balance */}
                 <div className="relative z-10 my-3">
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Số dư SOL khả dụng
+                    Số dư SOL khả dụng thực tế
                   </span>
                   <div className="flex items-baseline gap-2.5 mt-0.5">
                     <span
@@ -388,7 +393,7 @@ export default function RelayerPage() {
                   <div>
                     <span className="text-[10px] text-slate-400 font-mono block">ĐỊA CHỈ VÍ RELAYER:</span>
                     <span className="font-mono text-white text-[11px] font-bold tracking-wider">
-                      {truncateAddress(relayerAddress)}
+                      {truncateAddress(address)}
                     </span>
                   </div>
 
@@ -438,7 +443,6 @@ export default function RelayerPage() {
 
           {/* 2. Khối Bảng điều khiển Tài trợ (Bên phải, 50% width) */}
           <div className="ned-card p-6 flex flex-col justify-between h-full relative overflow-hidden">
-            {/* Header */}
             <div>
               <div className="flex items-center justify-between mb-4">
                 <div>
@@ -446,23 +450,25 @@ export default function RelayerPage() {
                     Bảng điều khiển Tài trợ (Sponsorship Control)
                   </h2>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Tùy chỉnh hạn mức ngân sách, công tắc khẩn cấp và ngưỡng báo động
+                    Tùy chỉnh hạn mức ngân sách, công tắc khẩn cấp và ngưỡng cảnh báo
                   </p>
                 </div>
-                <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-[#9945FF]/15 text-[#9945FF] border border-[#9945FF]/30">
-                  Settings Hub
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-[#9945FF]/15 text-[#9945FF] border border-[#9945FF]/30">
+                    relayer_settings (Supabase)
+                  </span>
+                </div>
               </div>
 
-              {/* Control Item 1: Thanh trượt Hạn mức (Slider 0 - 50 SOL) */}
+              {/* Control Item 1: Thanh trượt Hạn mức (Slider 5 - 50 SOL) */}
               <div className="p-4 rounded-xl bg-[#0F1629]/90 border border-white/5 mb-4">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                    <span>🎯</span> Hạn mức tài trợ mục tiêu (Budget Limit)
+                    <span>🎯</span> Hạn mức tài trợ mục tiêu (Daily Limit)
                   </span>
                   <div className="flex items-center gap-1.5">
                     <span className="text-base font-black text-[#14F195] font-mono">
-                      {sponsorLimit.toFixed(1)} SOL
+                      {dailyLimit.toFixed(1)} SOL
                     </span>
                     <span className="text-[10px] text-slate-500">/ 50.0 MAX</span>
                   </div>
@@ -472,16 +478,16 @@ export default function RelayerPage() {
                   type="range"
                   min="5"
                   max="50"
-                  step="1"
-                  value={sponsorLimit}
-                  onChange={(e) => setSponsorLimit(Number(e.target.value))}
+                  step="0.5"
+                  value={dailyLimit}
+                  onChange={(e) => setDailyLimit(Number(e.target.value))}
                   className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-[#14F195]"
                 />
 
                 <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-2">
                   <span>5.0 SOL</span>
                   <span className="text-emerald-400 font-bold">
-                    Khả dụng: {capacityPercent}% ({balance.toFixed(2)} / {sponsorLimit.toFixed(1)} SOL)
+                    Khả dụng: {capacityPercent}% ({balance.toFixed(2)} / {dailyLimit.toFixed(1)} SOL)
                   </span>
                   <span>50.0 SOL</span>
                 </div>
@@ -490,7 +496,7 @@ export default function RelayerPage() {
               {/* Control Item 2: Công tắc Tạm dừng (Kill Switch) */}
               <div
                 className={`p-4 rounded-xl border transition-all duration-300 mb-4 ${
-                  isSponsoringActive
+                  isActive
                     ? "bg-emerald-950/15 border-emerald-500/30"
                     : "bg-rose-950/20 border-rose-500/40"
                 }`}
@@ -498,27 +504,27 @@ export default function RelayerPage() {
                 <div className="flex items-center justify-between">
                   <div className="flex flex-col">
                     <span className="text-xs font-bold text-white flex items-center gap-2">
-                      <span className="text-base">{isSponsoringActive ? "⚡" : "🛑"}</span>
-                      {isSponsoringActive ? "Trạng thái: Đang tài trợ (Active)" : "Trạng thái: Tạm ngưng (Emergency Stopped)"}
+                      <span className="text-base">{isActive ? "⚡" : "🛑"}</span>
+                      {isActive ? "Trạng thái: Đang tài trợ (Active)" : "Trạng thái: Tạm ngưng (Paused)"}
                     </span>
                     <span className="text-[11px] text-slate-400 mt-0.5">
-                      {isSponsoringActive
-                        ? "Hệ thống đang tự động ký và bảo trợ 100% phí gas cho người dùng"
+                      {isActive
+                        ? "Hệ thống đang tự động bảo trợ 100% phí gas cho người dùng"
                         : "Tất cả yêu cầu tài trợ gasless sẽ bị tạm ngừng ngay lập tức"}
                     </span>
                   </div>
 
                   {/* UI Toggle Switch */}
                   <button
-                    onClick={() => setIsSponsoringActive(!isSponsoringActive)}
+                    onClick={() => setIsActive(!isActive)}
                     className={`relative w-14 h-8 rounded-full p-1 transition-colors duration-300 ${
-                      isSponsoringActive ? "bg-[#14F195]" : "bg-rose-600"
+                      isActive ? "bg-[#14F195]" : "bg-rose-600"
                     }`}
                     aria-label="Toggle Sponsoring"
                   >
                     <div
                       className={`w-6 h-6 rounded-full bg-white shadow-md transform transition-transform duration-300 ${
-                        isSponsoringActive ? "translate-x-6" : "translate-x-0"
+                        isActive ? "translate-x-6" : "translate-x-0"
                       }`}
                     />
                   </button>
@@ -530,7 +536,7 @@ export default function RelayerPage() {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                      <span>⚠️</span> Ngưỡng kích hoạt cảnh báo cạn quỹ
+                      <span>⚠️</span> Ngưỡng cảnh báo cạn quỹ (Alert Threshold)
                     </span>
                     <span className="text-[11px] text-slate-400 mt-0.5 block">
                       Hiển thị cảnh báo đỏ khi số dư ví Relayer tụt xuống dưới mức này
@@ -543,8 +549,8 @@ export default function RelayerPage() {
                       min="0.5"
                       max="10"
                       step="0.5"
-                      value={warningThreshold}
-                      onChange={(e) => setWarningThreshold(Number(e.target.value))}
+                      value={alertThreshold}
+                      onChange={(e) => setAlertThreshold(Number(e.target.value))}
                       className="w-20 px-3 py-1.5 bg-black/40 text-center text-xs font-bold text-white rounded-lg border border-white/10 focus:border-[#9945FF] focus:outline-none"
                     />
                     <span className="text-xs font-bold text-slate-400">SOL</span>
@@ -554,25 +560,44 @@ export default function RelayerPage() {
                 {isLowBalance && (
                   <div className="mt-3 p-2.5 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2 animate-pulse">
                     <span>🚨</span>
-                    <span>Số dư hiện tại ({balance.toFixed(4)} SOL) đã thấp hơn ngưỡng cảnh báo {warningThreshold} SOL!</span>
+                    <span>
+                      Số dư hiện tại ({balance.toFixed(4)} SOL) đã thấp hơn ngưỡng cảnh báo {alertThreshold} SOL!
+                    </span>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Bottom: Lưu cấu hình */}
+            {/* Bottom info & Save Button */}
             <div className="mt-5 pt-3 border-t border-white/5 flex items-center justify-between">
               <span className="text-[11px] text-slate-500 font-mono">
-                Cấu hình có hiệu lực tức thì trên toàn bộ hệ thống
+                Lưu trực tiếp vào bảng relayer_settings (id: 1)
               </span>
               <button
                 onClick={handleSaveSettings}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-white/10 hover:bg-white/15 border border-white/10 transition-all flex items-center gap-1.5"
+                disabled={isSaving}
+                className="px-5 py-2 rounded-xl text-xs font-bold text-white shadow-md transition-all flex items-center gap-2 hover:opacity-95 active:scale-95 disabled:opacity-50"
+                style={{
+                  background: "linear-gradient(135deg, #9945FF 0%, #14F195 100%)",
+                  boxShadow: "0 0 15px rgba(153, 69, 255, 0.3)",
+                }}
               >
-                {isSavedNotice ? (
-                  <span className="text-emerald-400">✓ Đã áp dụng</span>
+                {isSaving ? (
+                  <>
+                    <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
+                    </svg>
+                    <span>Đang lưu...</span>
+                  </>
                 ) : (
-                  <span>Lưu cấu hình</span>
+                  <>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                      <polyline points="17 21 17 13 7 13 7 21" />
+                      <polyline points="7 3 7 8 15 8" />
+                    </svg>
+                    <span>Lưu ngay</span>
+                  </>
                 )}
               </button>
             </div>
@@ -589,23 +614,22 @@ export default function RelayerPage() {
                   Lịch sử Tiêu dùng & Tài trợ On-chain
                 </h2>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                  User-friendly History
+                  Supabase relayer_logs
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Danh sách các giao dịch gasless đã được ví Relayer bảo trợ (dịch sang ngôn ngữ người dùng)
+                Danh sách các giao dịch gasless thực tế đã được ví Relayer bảo trợ
               </p>
             </div>
 
             {/* Category Filter Tabs */}
             <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0 bg-[#0F1629] p-1 rounded-xl border border-white/5">
               {[
-                { id: "all", label: "Tất cả (6)" },
+                { id: "all", label: `Tất cả (${logs.length})` },
                 { id: "mint", label: "Mint NFT" },
                 { id: "otp", label: "Xác thực OTP" },
                 { id: "username", label: "Đăng ký Tên" },
                 { id: "wallet", label: "Tạo ví" },
-                { id: "reward", label: "Mini-App" },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -636,69 +660,104 @@ export default function RelayerPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 text-slate-300">
-                {filteredHistory.map((item) => (
-                  <tr key={item.id} className="hover:bg-white/[0.02] transition-colors">
-                    {/* Thời gian */}
-                    <td className="py-3.5 px-4 font-mono text-slate-400 text-[11px] whitespace-nowrap">
-                      {item.time}
-                    </td>
-
-                    {/* Sự kiện (Thân thiện non-tech) */}
-                    <td className="py-3.5 px-4">
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">{item.icon}</span>
-                        <span className="font-bold text-white text-xs">{item.event}</span>
+                {loading ? (
+                  Array.from({ length: 4 }).map((_, i) => (
+                    <tr key={i} className="animate-pulse">
+                      <td className="py-4 px-4"><div className="h-4 w-24 bg-white/5 rounded" /></td>
+                      <td className="py-4 px-4"><div className="h-4 w-40 bg-white/5 rounded" /></td>
+                      <td className="py-4 px-4"><div className="h-4 w-32 bg-white/5 rounded" /></td>
+                      <td className="py-4 px-4"><div className="h-4 w-20 bg-white/5 rounded" /></td>
+                      <td className="py-4 px-4"><div className="h-4 w-16 bg-white/5 rounded-full" /></td>
+                      <td className="py-4 px-4 text-right"><div className="h-4 w-12 bg-white/5 rounded ml-auto" /></td>
+                    </tr>
+                  ))
+                ) : filteredLogs.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-12 px-4 text-center">
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <span className="text-3xl">⛽</span>
+                        <p className="text-sm font-bold text-white">Chưa có bản ghi giao dịch nào</p>
+                        <p className="text-xs text-slate-500">
+                          Các giao dịch được tài trợ gasless sẽ tự động xuất hiện tại đây sau khi thực hiện.
+                        </p>
                       </div>
-                    </td>
-
-                    {/* Người nhận */}
-                    <td className="py-3.5 px-4">
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-emerald-300 text-xs">
-                          {item.recipient}
-                        </span>
-                        <span className="font-mono text-[10px] text-slate-500">
-                          {truncateAddress(item.wallet)}
-                        </span>
-                      </div>
-                    </td>
-
-                    {/* Số SOL tiêu hao */}
-                    <td className="py-3.5 px-4">
-                      <div className="flex flex-col">
-                        <span className="font-mono text-rose-400 font-bold text-xs">
-                          {item.spentSOL}
-                        </span>
-                        <span className="text-[10px] text-slate-500">{item.spentUSD}</span>
-                      </div>
-                    </td>
-
-                    {/* Trạng thái */}
-                    <td className="py-3.5 px-4">
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-950/60 text-[#14F195] border border-emerald-500/40">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#14F195] pulse-dot" />
-                        Thành công
-                      </span>
-                    </td>
-
-                    {/* Chi tiết Tx / Explorer Link */}
-                    <td className="py-3.5 px-4 text-right">
-                      <a
-                        href={`https://explorer.solana.com/tx/${item.txHash}?cluster=devnet`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#9945FF] hover:text-[#14F195] hover:underline transition-colors"
-                      >
-                        <span>Explorer</span>
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                          <polyline points="15 3 21 3 21 9" />
-                          <line x1="10" y1="14" x2="21" y2="3" />
-                        </svg>
-                      </a>
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  filteredLogs.map((item) => {
+                    const actionInfo = getActionDetails(item.action);
+                    const recipientName = item.username || truncateAddress(item.wallet_address);
+                    const spentUSD = (item.amount_sol * solPriceUSD).toFixed(4);
+
+                    return (
+                      <tr key={item.id} className="hover:bg-white/[0.02] transition-colors">
+                        {/* Thời gian */}
+                        <td className="py-3.5 px-4 font-mono text-slate-400 text-[11px] whitespace-nowrap">
+                          {formatDate(item.created_at)}
+                        </td>
+
+                        {/* Sự kiện (Thân thiện non-tech) */}
+                        <td className="py-3.5 px-4">
+                          <div className="flex items-center gap-2">
+                            <span className="text-base">{actionInfo.icon}</span>
+                            <span className="font-bold text-white text-xs">{actionInfo.title}</span>
+                          </div>
+                        </td>
+
+                        {/* Người nhận */}
+                        <td className="py-3.5 px-4">
+                          <div className="flex flex-col">
+                            <span className="font-semibold text-emerald-300 text-xs">
+                              {recipientName}
+                            </span>
+                            <span className="font-mono text-[10px] text-slate-500">
+                              {truncateAddress(item.wallet_address)}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* Số SOL tiêu hao */}
+                        <td className="py-3.5 px-4">
+                          <div className="flex flex-col">
+                            <span className="font-mono text-rose-400 font-bold text-xs">
+                              -{item.amount_sol.toFixed(6)} SOL
+                            </span>
+                            <span className="text-[10px] text-slate-500">~${spentUSD} USD</span>
+                          </div>
+                        </td>
+
+                        {/* Trạng thái */}
+                        <td className="py-3.5 px-4">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-950/60 text-[#14F195] border border-emerald-500/40">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#14F195] pulse-dot" />
+                            Thành công
+                          </span>
+                        </td>
+
+                        {/* Chi tiết Tx / Explorer Link */}
+                        <td className="py-3.5 px-4 text-right">
+                          {item.signature ? (
+                            <a
+                              href={`https://explorer.solana.com/tx/${item.signature}?cluster=devnet`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#9945FF] hover:text-[#14F195] hover:underline transition-colors"
+                            >
+                              <span>Explorer</span>
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                <polyline points="15 3 21 3 21 9" />
+                                <line x1="10" y1="14" x2="21" y2="3" />
+                              </svg>
+                            </a>
+                          ) : (
+                            <span className="text-slate-600 text-[11px]">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -706,10 +765,10 @@ export default function RelayerPage() {
           {/* Table Footer */}
           <div className="flex items-center justify-between text-xs text-slate-400 pt-2">
             <span>
-              Hiển thị <strong className="text-white">{filteredHistory.length}</strong> / {initialSpendHistory.length} sự kiện
+              Hiển thị <strong className="text-white">{filteredLogs.length}</strong> / {logs.length} sự kiện
             </span>
             <span className="text-[11px] font-mono text-slate-500">
-              Giao dịch tự động đồng bộ qua Gasless Relayer RPC
+              Đồng bộ trực tiếp từ bảng Supabase: relayer_logs
             </span>
           </div>
         </div>
@@ -746,7 +805,6 @@ export default function RelayerPage() {
             {/* Modal QR Code */}
             <div className="flex flex-col items-center justify-center gap-3 py-2">
               <div className="p-3 rounded-2xl bg-[#0B0F19] border border-white/10 shadow-inner flex items-center justify-center">
-                {/* QR Image */}
                 <img
                   src={qrCodeUrl}
                   alt="Relayer Wallet QR Code"
@@ -765,10 +823,10 @@ export default function RelayerPage() {
               <span className="text-[11px] font-semibold text-slate-400">ĐỊA CHỈ VÍ RELAYER:</span>
               <div className="p-3 rounded-xl bg-[#0B0F19] border border-white/10 flex items-center justify-between gap-2">
                 <span className="font-mono text-xs text-white break-all select-all">
-                  {relayerAddress}
+                  {address}
                 </span>
                 <button
-                  onClick={() => handleCopy(relayerAddress)}
+                  onClick={() => handleCopy(address)}
                   className="px-3 py-1.5 rounded-lg bg-[#14F195]/15 text-[#14F195] hover:bg-[#14F195]/25 border border-[#14F195]/30 text-xs font-bold whitespace-nowrap transition-colors"
                 >
                   {copiedAddress ? "✓ Đã chép" : "Copy"}
