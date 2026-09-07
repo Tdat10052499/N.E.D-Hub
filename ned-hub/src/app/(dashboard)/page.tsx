@@ -71,9 +71,13 @@ const WARNING_THRESHOLD = 2.0;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+function formatNumber(n: number): string {
+  return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
 function formatK(n: number): string {
   if (n >= 1000) return (n / 1000).toFixed(1) + "k";
-  return n.toLocaleString();
+  return formatNumber(n);
 }
 
 function truncateAddress(addr: string): string {
@@ -215,7 +219,7 @@ function FunnelCustomTooltip({ active, payload }: { active?: boolean; payload?: 
         <span className="text-slate-400">({d.label})</span>
       </div>
       <div className="flex items-baseline gap-2">
-        <span className="text-lg font-black text-white">{d.value.toLocaleString()}</span>
+        <span className="text-lg font-black text-white">{formatNumber(d.value)}</span>
         <span className="text-slate-400">users</span>
       </div>
       <div className="mt-1 pt-1.5 border-t border-white/10 flex justify-between gap-4 text-[11px]">
@@ -298,7 +302,7 @@ function OnboardingFunnelCard() {
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-400">Total volume:</span>
           <span className="text-xs font-bold text-white px-2.5 py-1 rounded-lg bg-white/5 border border-white/5">
-            {funnel[0].value.toLocaleString()} users
+            {formatNumber(funnel[0].value)} users
           </span>
         </div>
       </div>
