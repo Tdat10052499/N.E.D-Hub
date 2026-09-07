@@ -189,3 +189,49 @@ body {
 .recharts-tooltip-wrapper {
   outline: none;
 }
+
+/* Tiptap Rich Text Editor & Preview Dark Mode Styles */
+.tiptap {
+  color: #f0f4ff;
+  font-size: 0.8125rem;
+}
+
+.tiptap p {
+  margin: 0.25rem 0;
+}
+
+.tiptap ul {
+  list-style-type: disc;
+  padding-left: 1.25rem;
+  margin: 0.25rem 0;
+}
+
+.tiptap ol {
+  list-style-type: decimal;
+  padding-left: 1.25rem;
+  margin: 0.25rem 0;
+}
+
+.tiptap a,
+.preview-content a {
+  color: #14f195;
+  text-decoration: underline;
+  font-weight: 500;
+}
+
+.preview-content ul {
+  list-style-type: disc;
+  padding-left: 1.25rem;
+  margin: 0.25rem 0;
+}
+
+.preview-content ol {
+  list-style-type: decimal;
+  padding-left: 1.25rem;
+  margin: 0.25rem 0;
+}
+
+.preview-content p {
+  margin: 0.25rem 0;
+}
+
