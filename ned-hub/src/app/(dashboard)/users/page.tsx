@@ -2,25 +2,24 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
+import Navbar from "@/components/Navbar";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types matching actual Supabase Schema ────────────────────────────────────
 
-export type OnboardingStatus = 'auth' | 'otp_verified' | 'name_selected' | 'minted';
-
-export interface Attendee {
+export interface User {
   id: string;
-  name: string;
-  wallet_address: string;
-  status: OnboardingStatus;
+  username: string | null;
+  wallet_address: string | null;
+  onboarding_status: string;
   created_at: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function truncateAddress(addr: string): string {
-  if (!addr || addr === 'Chưa liên kết ví') return addr || '—';
+function truncateAddress(addr: string | null): string {
+  if (!addr) return "Chưa tạo ví";
   if (addr.length <= 12) return addr;
-  return addr.slice(0, 6) + '...' + addr.slice(-6);
+  return addr.slice(0, 6) + "..." + addr.slice(-6);
 }
 
 function formatDate(isoString: string): string {
@@ -28,10 +27,10 @@ function formatDate(isoString: string): string {
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return isoString;
 
-    const hours = String(d.getHours()).padStart(2, '0');
-    const minutes = String(d.getMinutes()).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, "0");
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
     const year = d.getFullYear();
 
     return `${hours}:${minutes} - ${day}/${month}/${year}`;
@@ -40,91 +39,106 @@ function formatDate(isoString: string): string {
   }
 }
 
-function exportToCSV(data: Attendee[]) {
+function exportToCSV(data: User[]) {
   if (!data.length) return;
 
-  const headers = ['STT', 'ID', 'Ten Dinh Danh (Name)', 'Dia Chi Vi (Wallet Address)', 'Trang Thai (Status)', 'Thoi Gian Tao (Created At)'];
+  const headers = [
+    "STT",
+    "ID",
+    "Ten Nguoi Dung (Username)",
+    "Dia Chi Vi (Wallet Address)",
+    "Trang Thai (Onboarding Status)",
+    "Thoi Gian Tao (Created At)",
+  ];
+
   const rows = data.map((item, index) => [
     index + 1,
     `"${item.id}"`,
-    `"${item.name.replace(/"/g, '""')}"`,
-    `"${item.wallet_address}"`,
-    `"${item.status}"`,
+    `"${(item.username || "Chưa đặt tên").replace(/"/g, '""')}"`,
+    `"${item.wallet_address || "Chưa tạo ví"}"`,
+    `"${item.onboarding_status}"`,
     `"${formatDate(item.created_at)}"`,
   ]);
 
-  const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const csvContent =
+    "\uFEFF" + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.setAttribute('href', url);
-  link.setAttribute('download', `tech4life_attendees_${new Date().toISOString().slice(0, 10)}.csv`);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute(
+    "download",
+    `ned_wallet_users_${new Date().toISOString().slice(0, 10)}.csv`
+  );
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
 
-import Navbar from "@/components/Navbar";
-
 // ─── Status Badge Component ──────────────────────────────────────────────────
 
-function StatusBadge({ status }: { status: OnboardingStatus }) {
-  switch (status) {
-    case 'minted':
+function StatusBadge({ status }: { status: string }) {
+  const normStatus = (status || "").toLowerCase().trim();
+
+  switch (normStatus) {
+    case "minted":
+    case "completed":
       return (
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-emerald-950/60 text-[#14F195] border border-emerald-500/40 shadow-[0_0_12px_rgba(20,241,149,0.15)]">
           <span className="w-1.5 h-1.5 rounded-full bg-[#14F195] pulse-dot" />
-          Minted (On-chain)
+          minted (On-chain)
         </span>
       );
-    case 'name_selected':
+    case "name_selected":
+    case "name_created":
       return (
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-blue-950/50 text-blue-300 border border-blue-500/30">
           <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-          Name Selected
+          name_selected
         </span>
       );
-    case 'otp_verified':
+    case "otp_verified":
+    case "verified":
       return (
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-950/50 text-amber-300 border border-amber-500/30">
           <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-          OTP Verified
+          otp_verified
         </span>
       );
-    case 'auth':
+    case "auth":
     default:
       return (
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-slate-800/60 text-slate-400 border border-slate-700/40">
           <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-          Auth (Đăng nhập)
+          {status || "auth"}
         </span>
       );
   }
 }
 
-// ─── Main Attendees Page ─────────────────────────────────────────────────────
+// ─── Main Users Page Component ───────────────────────────────────────────────
 
-export default function AttendeesPage() {
-  const [attendees, setAttendees] = useState<Attendee[]>([]);
+export default function UsersPage() {
+  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Fetch attendees from API
-  const fetchAttendees = useCallback(async () => {
+  // Fetch users from API /api/users
+  const fetchUsers = useCallback(async () => {
     try {
       setRefreshing(true);
-      const res = await fetch("/api/attendees");
+      const res = await fetch("/api/users");
       if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
       const result = await res.json();
       if (result.success && Array.isArray(result.data)) {
-        setAttendees(result.data);
+        setUsers(result.data);
       }
     } catch (err) {
-      console.error("Lỗi khi tải danh sách attendees:", err);
+      console.error("Lỗi khi nạp dữ liệu người dùng từ /api/users:", err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -132,67 +146,67 @@ export default function AttendeesPage() {
   }, []);
 
   useEffect(() => {
-    fetchAttendees();
-    const interval = setInterval(fetchAttendees, 15000); // Live poll every 15s
+    fetchUsers();
+    const interval = setInterval(fetchUsers, 15000); // Live poll every 15s
     return () => clearInterval(interval);
-  }, [fetchAttendees]);
+  }, [fetchUsers]);
 
   // Copy wallet address helper
-  const handleCopyAddress = (addr: string) => {
-    if (!addr || addr === 'Chưa liên kết ví') return;
+  const handleCopyAddress = (addr: string | null) => {
+    if (!addr) return;
     navigator.clipboard.writeText(addr);
     setCopiedAddress(addr);
     setTimeout(() => setCopiedAddress(null), 2000);
   };
 
-  // Filtered attendees
-  const filteredAttendees = useMemo(() => {
-    return attendees.filter((item) => {
-      // Filter by Status
-      if (statusFilter !== 'all' && item.status !== statusFilter) {
+  // Search logic: Filter by username, wallet_address, and id
+  const filteredUsers = useMemo(() => {
+    return users.filter((item) => {
+      // Filter by Status Tab
+      if (statusFilter !== "all" && item.onboarding_status !== statusFilter) {
         return false;
       }
       // Filter by Search Query
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase().trim();
-        const matchName = item.name.toLowerCase().includes(query);
-        const matchWallet = item.wallet_address.toLowerCase().includes(query);
-        const matchId = item.id.toLowerCase().includes(query);
-        return matchName || matchWallet || matchId;
+        const matchUsername = (item.username || "").toLowerCase().includes(query);
+        const matchWallet = (item.wallet_address || "").toLowerCase().includes(query);
+        const matchId = (item.id || "").toLowerCase().includes(query);
+        return matchUsername || matchWallet || matchId;
       }
       return true;
     });
-  }, [attendees, searchQuery, statusFilter]);
+  }, [users, searchQuery, statusFilter]);
 
-  // Summary counts
+  // Summary counts for the 5 Overview Cards
   const counts = useMemo(() => {
-    const total = attendees.length;
-    const minted = attendees.filter((a) => a.status === 'minted').length;
-    const nameSelected = attendees.filter((a) => a.status === 'name_selected').length;
-    const otpVerified = attendees.filter((a) => a.status === 'otp_verified').length;
-    const auth = attendees.filter((a) => a.status === 'auth').length;
+    const total = users.length;
+    const minted = users.filter((u) => u.onboarding_status === "minted").length;
+    const nameSelected = users.filter((u) => u.onboarding_status === "name_selected").length;
+    const otpVerified = users.filter((u) => u.onboarding_status === "otp_verified").length;
+    const auth = users.filter((u) => u.onboarding_status === "auth" || !u.onboarding_status).length;
 
     return { total, minted, nameSelected, otpVerified, auth };
-  }, [attendees]);
+  }, [users]);
 
   return (
     <div className="min-h-screen flex flex-col bg-[#0B0F19] text-[#F0F4FF] selection:bg-[#9945FF] selection:text-white">
       <Navbar />
 
       <main className="flex-1 px-6 sm:px-8 py-6 max-w-[1480px] w-full mx-auto flex flex-col gap-6">
-        {/* Header Section */}
+        {/* 1. Header & Nút hành động */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-3xl font-black text-white tracking-tight">
-                Quản lý Attendees
+                Quản lý Người dùng (Users)
               </h1>
               <span className="px-3 py-1 rounded-full text-xs font-bold bg-[#9945FF]/15 text-[#9945FF] border border-[#9945FF]/30">
-                Tech4life 2026
+                Supabase Schema V2
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-1">
-              Tra cứu thông tin, địa chỉ ví và trạng thái On-chain của khách tham quan sự kiện
+              Danh sách tài khoản ví N.E.D Wallet đồng bộ theo trường username và onboarding_status
             </p>
           </div>
 
@@ -208,8 +222,8 @@ export default function AttendeesPage() {
             </Link>
 
             <button
-              onClick={() => exportToCSV(filteredAttendees)}
-              disabled={filteredAttendees.length === 0}
+              onClick={() => exportToCSV(filteredUsers)}
+              disabled={filteredUsers.length === 0}
               className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-lg transition-all hover:opacity-90 active:scale-95 disabled:opacity-50"
               style={{
                 background: "linear-gradient(135deg, #9945FF 0%, #14F195 100%)",
@@ -221,55 +235,60 @@ export default function AttendeesPage() {
                 <polyline points="7 10 12 15 17 10" />
                 <line x1="12" y1="15" x2="12" y2="3" />
               </svg>
-              <span>Export CSV ({filteredAttendees.length})</span>
+              <span>Export CSV ({filteredUsers.length})</span>
             </button>
           </div>
         </div>
 
-        {/* Quick KPI Stat Cards */}
+        {/* 2. Thẻ Thống kê Tổng quan (5 Overview Cards) */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          {/* Tổng người dùng */}
           <div className="ned-card p-4 flex flex-col justify-between">
-            <span className="text-[11px] text-slate-400 font-medium">Tổng khách tham quan</span>
+            <span className="text-[11px] text-slate-400 font-medium">Tổng người dùng</span>
             <div className="text-2xl font-black text-white mt-1">
-              {counts.total}
+              {loading ? "..." : counts.total}
             </div>
-            <span className="text-[10px] text-slate-500 mt-1">Đã đăng ký hệ thống</span>
+            <span className="text-[10px] text-slate-500 mt-1">Trong bảng users</span>
           </div>
 
+          {/* Đã Mint (On-chain) */}
           <div className="ned-card p-4 flex flex-col justify-between border-emerald-500/20 bg-emerald-950/10">
-            <span className="text-[11px] text-emerald-400 font-medium">Đã Mint On-chain</span>
+            <span className="text-[11px] text-emerald-400 font-medium">Đã Mint (On-chain)</span>
             <div className="text-2xl font-black text-[#14F195] mt-1">
-              {counts.minted}
+              {loading ? "..." : counts.minted}
             </div>
-            <span className="text-[10px] text-emerald-500/80 mt-1">Hoàn tất trải nghiệm</span>
+            <span className="text-[10px] text-emerald-500/80 mt-1">onboarding_status: minted</span>
           </div>
 
+          {/* Đã chọn username */}
           <div className="ned-card p-4 flex flex-col justify-between">
-            <span className="text-[11px] text-blue-400 font-medium">Đã chọn tên ví</span>
-            <div className="text-2xl font-black text-blue-300 mt-1">
-              {counts.nameSelected}
+            <span className="text-[11px] text-blue-400 font-medium">Đã chọn username</span>
+            <div className="text-2xl font-black text-blue-400 mt-1">
+              {loading ? "..." : counts.nameSelected}
             </div>
-            <span className="text-[10px] text-slate-500 mt-1">Chờ ký giao dịch</span>
+            <span className="text-[10px] text-slate-500 mt-1">name_selected</span>
           </div>
 
+          {/* Đã xác thực OTP */}
           <div className="ned-card p-4 flex flex-col justify-between">
             <span className="text-[11px] text-amber-400 font-medium">Đã xác thực OTP</span>
-            <div className="text-2xl font-black text-amber-300 mt-1">
-              {counts.otpVerified}
+            <div className="text-2xl font-black text-amber-400 mt-1">
+              {loading ? "..." : counts.otpVerified}
             </div>
-            <span className="text-[10px] text-slate-500 mt-1">Đang chọn tên ví</span>
+            <span className="text-[10px] text-slate-500 mt-1">otp_verified</span>
           </div>
 
+          {/* Mới Auth */}
           <div className="ned-card p-4 flex flex-col justify-between">
             <span className="text-[11px] text-slate-400 font-medium">Mới Auth</span>
             <div className="text-2xl font-black text-slate-300 mt-1">
-              {counts.auth}
+              {loading ? "..." : counts.auth}
             </div>
-            <span className="text-[10px] text-slate-500 mt-1">Chưa gửi mã OTP</span>
+            <span className="text-[10px] text-slate-500 mt-1">auth</span>
           </div>
         </div>
 
-        {/* Toolbar & Filters */}
+        {/* 3. Khu vực Tìm kiếm & Lọc (Search & Filter Bar) */}
         <div className="ned-card p-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           {/* Search Bar */}
           <div className="relative flex-1 max-w-md">
@@ -281,7 +300,7 @@ export default function AttendeesPage() {
             </div>
             <input
               type="text"
-              placeholder="Tìm theo tên định danh hoặc địa chỉ ví Solana..."
+              placeholder="Tìm theo username hoặc địa chỉ wallet_address..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-2 bg-[#0F1629] text-xs text-white placeholder-slate-500 rounded-xl border border-white/10 focus:border-[#9945FF]/50 focus:outline-none focus:ring-1 focus:ring-[#9945FF]/30 transition-all"
@@ -302,11 +321,11 @@ export default function AttendeesPage() {
           {/* Status Filter Tabs */}
           <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
             {[
-              { id: 'all', label: 'Tất cả', count: counts.total },
-              { id: 'minted', label: 'Minted', count: counts.minted },
-              { id: 'name_selected', label: 'Name Selected', count: counts.nameSelected },
-              { id: 'otp_verified', label: 'OTP Verified', count: counts.otpVerified },
-              { id: 'auth', label: 'Auth', count: counts.auth },
+              { id: "all", label: "Tất cả", count: counts.total },
+              { id: "minted", label: "Minted", count: counts.minted },
+              { id: "name_selected", label: "Name Selected", count: counts.nameSelected },
+              { id: "otp_verified", label: "OTP Verified", count: counts.otpVerified },
+              { id: "auth", label: "Auth", count: counts.auth },
             ].map((tab) => {
               const isActive = statusFilter === tab.id;
               return (
@@ -322,7 +341,7 @@ export default function AttendeesPage() {
                   <span>{tab.label}</span>
                   <span
                     className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                      isActive ? "bg-[#9945FF] text-white" : "bg-white/10 text-slate-400"
+                      isActive ? "bg-[#9945FF] text-white font-bold" : "bg-white/10 text-slate-400"
                     }`}
                   >
                     {tab.count}
@@ -333,9 +352,9 @@ export default function AttendeesPage() {
 
             {/* Refresh Button */}
             <button
-              onClick={fetchAttendees}
+              onClick={fetchUsers}
               disabled={refreshing}
-              title="Làm mới dữ liệu"
+              title="Làm mới dữ liệu từ /api/users"
               className="p-2 ml-1 rounded-lg text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 border border-white/5 transition-colors"
             >
               <svg
@@ -351,23 +370,23 @@ export default function AttendeesPage() {
           </div>
         </div>
 
-        {/* Data Table */}
+        {/* 4. Bảng Dữ liệu (Data Table) */}
         <div className="ned-card overflow-hidden border border-white/10">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-[#0F1629] text-slate-400 uppercase font-mono text-[10px] tracking-wider border-b border-white/5">
                 <tr>
                   <th className="py-3.5 px-4 font-semibold w-16">STT</th>
-                  <th className="py-3.5 px-4 font-semibold">Tên định danh (Name)</th>
-                  <th className="py-3.5 px-4 font-semibold">Địa chỉ ví (Wallet Address)</th>
-                  <th className="py-3.5 px-4 font-semibold">Trạng thái (Status)</th>
-                  <th className="py-3.5 px-4 font-semibold">Thời gian tham gia</th>
+                  <th className="py-3.5 px-4 font-semibold">Tên định danh (username)</th>
+                  <th className="py-3.5 px-4 font-semibold">Địa chỉ ví (wallet_address)</th>
+                  <th className="py-3.5 px-4 font-semibold">Trạng thái (onboarding_status)</th>
+                  <th className="py-3.5 px-4 font-semibold">Thời gian tạo (created_at)</th>
                   <th className="py-3.5 px-4 font-semibold text-right">Khám phá</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 text-slate-300">
                 {loading ? (
-                  // Loading Skeleton Rows
+                  // Skeleton Loading Rows
                   Array.from({ length: 5 }).map((_, i) => (
                     <tr key={i} className="animate-pulse">
                       <td className="py-4 px-4"><div className="h-4 w-6 bg-white/5 rounded" /></td>
@@ -378,7 +397,7 @@ export default function AttendeesPage() {
                       <td className="py-4 px-4 text-right"><div className="h-4 w-12 bg-white/5 rounded ml-auto" /></td>
                     </tr>
                   ))
-                ) : filteredAttendees.length === 0 ? (
+                ) : filteredUsers.length === 0 ? (
                   // Empty State
                   <tr>
                     <td colSpan={6} className="py-12 px-4 text-center">
@@ -386,61 +405,62 @@ export default function AttendeesPage() {
                         <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-slate-500 text-xl">
                           🔍
                         </div>
-                        <p className="text-sm font-bold text-white">Không tìm thấy khách tham quan nào</p>
+                        <p className="text-sm font-bold text-white">Không tìm thấy người dùng nào</p>
                         <p className="text-xs text-slate-500 max-w-sm">
                           {searchQuery
-                            ? `Không có kết quả khớp với từ khóa "${searchQuery}". Vui lòng thử lại.`
-                            : "Chưa có dữ liệu người dùng được ghi nhận trong phễu."}
+                            ? `Không có kết quả khớp với "${searchQuery}" theo username hoặc wallet_address.`
+                            : "Chưa có dữ liệu người dùng trong bảng users."}
                         </p>
                       </div>
                     </td>
                   </tr>
                 ) : (
                   // Data Rows
-                  filteredAttendees.map((item, index) => {
+                  filteredUsers.map((item, index) => {
                     const isCopied = copiedAddress === item.wallet_address;
-                    const hasValidWallet = item.wallet_address && item.wallet_address !== 'Chưa liên kết ví';
+                    const displayName = item.username || "Chưa đặt tên";
+                    const hasWallet = Boolean(item.wallet_address && item.wallet_address !== "Chưa liên kết ví");
 
                     return (
                       <tr
                         key={item.id}
                         className="hover:bg-white/[0.02] transition-colors group"
                       >
-                        {/* STT */}
+                        {/* Cột STT: Hiển thị dạng #01, #02 */}
                         <td className="py-3.5 px-4 font-mono text-slate-500 font-medium">
-                          #{String(index + 1).padStart(2, '0')}
+                          #{String(index + 1).padStart(2, "0")}
                         </td>
 
-                        {/* Name */}
+                        {/* Cột TÊN ĐỊNH DANH (USERNAME): Avatar tròn tự tạo bằng 2 chữ cái đầu */}
                         <td className="py-3.5 px-4">
                           <div className="flex items-center gap-2.5">
                             <div
-                              className="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black text-white shrink-0 shadow"
+                              className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black text-white shrink-0 shadow"
                               style={{
                                 background:
-                                  item.status === 'minted'
-                                    ? 'linear-gradient(135deg, #10B981, #14F195)'
-                                    : item.status === 'name_selected'
-                                    ? 'linear-gradient(135deg, #2563EB, #60A5FA)'
-                                    : 'linear-gradient(135deg, #6B7280, #9CA3AF)',
+                                  item.onboarding_status === "minted"
+                                    ? "linear-gradient(135deg, #10B981, #14F195)"
+                                    : item.onboarding_status === "name_selected"
+                                    ? "linear-gradient(135deg, #2563EB, #60A5FA)"
+                                    : "linear-gradient(135deg, #6B7280, #9CA3AF)",
                               }}
                             >
-                              {item.name.slice(0, 2).toUpperCase()}
+                              {displayName.slice(0, 2).toUpperCase()}
                             </div>
                             <div className="flex flex-col">
                               <span className="font-bold text-white text-xs tracking-tight group-hover:text-[#14F195] transition-colors">
-                                {item.name}
+                                {displayName}
                               </span>
-                              <span className="text-[10px] font-mono text-slate-500 truncate max-w-[120px]">
+                              <span className="text-[10px] font-mono text-slate-500 truncate max-w-[140px]">
                                 {item.id.slice(0, 8)}...
                               </span>
                             </div>
                           </div>
                         </td>
 
-                        {/* Wallet Address */}
+                        {/* Cột ĐỊA CHỈ VÍ (WALLET_ADDRESS): Rút gọn & nút Copy */}
                         <td className="py-3.5 px-4">
-                          {hasValidWallet ? (
+                          {hasWallet ? (
                             <div className="flex items-center gap-2">
                               <span className="font-mono text-xs text-slate-300 bg-black/30 px-2 py-0.5 rounded border border-white/5">
                                 {truncateAddress(item.wallet_address)}
@@ -467,19 +487,19 @@ export default function AttendeesPage() {
                           )}
                         </td>
 
-                        {/* Status */}
+                        {/* Cột TRẠNG THÁI (ONBOARDING_STATUS) */}
                         <td className="py-3.5 px-4">
-                          <StatusBadge status={item.status} />
+                          <StatusBadge status={item.onboarding_status} />
                         </td>
 
-                        {/* Created At */}
+                        {/* Cột THỜI GIAN TẠO (CREATED_AT): Định dạng HH:mm - DD/MM/YYYY */}
                         <td className="py-3.5 px-4 font-mono text-slate-400 text-[11px]">
                           {formatDate(item.created_at)}
                         </td>
 
-                        {/* Actions / Explorer Link */}
+                        {/* Cột KHÁM PHÁ: Explorer link sang Solana Explorer */}
                         <td className="py-3.5 px-4 text-right">
-                          {hasValidWallet ? (
+                          {hasWallet ? (
                             <a
                               href={`https://explorer.solana.com/address/${item.wallet_address}?cluster=devnet`}
                               target="_blank"
@@ -505,13 +525,13 @@ export default function AttendeesPage() {
             </table>
           </div>
 
-          {/* Table Footer */}
+          {/* 5. Chân trang Bảng (Footer) */}
           <div className="bg-[#0F1629] px-4 py-3 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
             <span>
-              Hiển thị <strong className="text-white">{filteredAttendees.length}</strong> / {attendees.length} khách tham quan
+              Hiển thị <strong className="text-white">{filteredUsers.length}</strong> / {users.length} người dùng
             </span>
             <span className="text-[11px] font-mono text-slate-500">
-              Tech4life Solana Live Sync
+              Supabase Schema: users (username, onboarding_status)
             </span>
           </div>
         </div>
