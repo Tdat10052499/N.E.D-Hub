@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:relayer": "tsx scripts/test-relayer.ts"
+    "test:relayer": "tsx scripts/test-relayer.ts",
+    "test:client-sponsor": "tsx scripts/test-client-sponsor.ts",
+    "test:onboarding-sync": "tsx scripts/test-onboarding-sync.ts"
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.4",

@@ -22,7 +22,9 @@ export async function GET() {
 
     if (users && users.length > 0) {
       users.forEach((user: Record<string, unknown>) => {
-        const status = String(user.status || '').toLowerCase().trim();
+        const status = String(
+          user.onboarding_status || user.status || ''
+        ).toLowerCase().trim();
         const step = Number(user.step) || 0;
         const isMinted = Boolean(user.is_minted || user.minted || user.wallet_address || status === 'minted' || step >= 4);
         const isNameSelected = Boolean(user.name_selected || user.username || user.name || status === 'name_selected' || step >= 3 || isMinted);
