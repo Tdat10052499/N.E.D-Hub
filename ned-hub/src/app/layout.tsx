@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { Toaster } from "react-hot-toast";
+import { NetworkProvider } from "@/context/NetworkContext";
 import "./globals.css";
 
 const inter = Inter({
@@ -23,7 +24,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${inter.variable} h-full antialiased`}>
       <body className={`${inter.variable} min-h-full bg-[#0b0f19] text-[#f0f4ff]`}>
-        {children}
+        <NetworkProvider>
+          {children}
+        </NetworkProvider>
         <Toaster
           position="top-right"
           toastOptions={{
