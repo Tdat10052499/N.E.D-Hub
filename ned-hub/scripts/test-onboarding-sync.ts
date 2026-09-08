@@ -1,4 +1,4 @@
-import { Connection, Keypair, SystemProgram, Transaction } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from '@solana/web3.js';
 import { connection } from '../src/lib/solana';
 import { sendSponsoredTransaction } from '../src/lib/sponsorClient';
 import {
@@ -64,12 +64,12 @@ async function runOnboardingSyncTests() {
     // GIAI ĐOẠN 4: Tài trợ Gas Relayer + Mint on-chain + Đồng bộ 'minted'
     // ----------------------------------------------------
     console.log('\n📌 [BƯỚC 4] Gửi giao dịch On-chain qua Relayer Gasless và chuyển sang minted...');
-    const recipient = Keypair.generate();
+    const VALID_PROGRAM_ID = new PublicKey('8tTSP75q3ggaxQiZdeC4LShcyjHN5yWJY4NnZeE3JaEi');
     const mintTx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: testUser.publicKey,
-        toPubkey: recipient.publicKey,
-        lamports: 0,
+      new TransactionInstruction({
+        programId: VALID_PROGRAM_ID,
+        keys: [{ pubkey: testUser.publicKey, isSigner: true, isWritable: true }],
+        data: Buffer.from([]),
       })
     );
 

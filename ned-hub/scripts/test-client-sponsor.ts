@@ -1,134 +1,143 @@
 import {
   Keypair,
   PublicKey,
-  SystemProgram,
   Transaction,
+  TransactionInstruction,
 } from '@solana/web3.js';
 import { connection } from '../src/lib/solana';
 import { sendSponsoredTransaction } from '../src/lib/sponsorClient';
+import { VALID_PROGRAM_ID } from '../src/app/api/sponsor-tx/route';
 
 const BASE_URL = process.env.API_BASE_URL || 'http://localhost:3000';
 
 async function main() {
   console.log('================================================================');
-  console.log('🚀 BẮT ĐẦU TEST TÍCH HỢP CLIENT-SIDE GASLESS TRANSACTION');
+  console.log('🚀 BẮT ĐẦU TEST BẢO MẬT VÀ TÍCH HỢP GASLESS RELAYER API');
   console.log('🌐 Server API:', BASE_URL);
   console.log('⚡ Solana RPC Endpoint:', connection.rpcEndpoint);
+  console.log('🔒 Smart Contract Program ID:', VALID_PROGRAM_ID.toBase58());
   console.log('================================================================\n');
 
   try {
     // ----------------------------------------------------
-    // BƯỚC 1: Khởi tạo thông tin người dùng giả lập
+    // TEST 1: Kiểm thử Bảo mật - Giao dịch không chứa Program ID hợp lệ (BẮT BUỘC BỊ TỪ CHỐI 403)
     // ----------------------------------------------------
-    console.log('📋 [BƯỚC 1] Khởi tạo môi trường client giả lập...');
+    console.log('🛡️  [TEST 1] Kiểm thử Bộ lọc Bảo mật (Chặn giao dịch không hợp lệ)...');
     const userKeypair = Keypair.generate();
-    const recipientKeypair = Keypair.generate();
+    const fakeProgramId = Keypair.generate().publicKey;
 
-    console.log(`   - Khách tham quan (User Public Key): ${userKeypair.publicKey.toBase58()}`);
-    console.log(`   - Địa chỉ nhận (Recipient Public Key): ${recipientKeypair.publicKey.toBase58()}`);
-
-    // ----------------------------------------------------
-    // BƯỚC 2: Tạo transaction mẫu (Gasless Transfer / Action)
-    // ----------------------------------------------------
-    console.log('\n📝 [BƯỚC 2] Tạo giao dịch mẫu (SystemProgram.transfer)...');
-    const transaction = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: userKeypair.publicKey,
-        toPubkey: recipientKeypair.publicKey,
-        lamports: 0, // 0 lamport để kiểm thử hành động ký của khách tham quan không tốn SOL
+    const invalidTx = new Transaction().add(
+      new TransactionInstruction({
+        programId: fakeProgramId,
+        keys: [{ pubkey: userKeypair.publicKey, isSigner: true, isWritable: true }],
+        data: Buffer.from([]),
       })
     );
 
-    // ----------------------------------------------------
-    // BƯỚC 3: Lấy thông tin ví Relayer & Blockhash
-    // ----------------------------------------------------
-    console.log('⚡ [BƯỚC 3] Lấy blockhash mới nhất và địa chỉ ví Relayer...');
-    const { blockhash } = await connection.getLatestBlockhash('confirmed');
-    transaction.recentBlockhash = blockhash;
+    const { blockhash: b1 } = await connection.getLatestBlockhash('confirmed');
+    invalidTx.recentBlockhash = b1;
 
-    // Lấy public key của Relayer từ endpoint
+    // Lấy thông tin ví Relayer
     const relayerRes = await fetch(`${BASE_URL}/api/relayer-balance`);
-    if (!relayerRes.ok) {
-      throw new Error(`Không thể kết nối /api/relayer-balance: HTTP ${relayerRes.status}`);
-    }
     const relayerData = await relayerRes.json();
-    console.log(`   - Ví Relayer bảo trợ: ${relayerData.address} (Số dư: ${relayerData.balance} SOL)`);
+    invalidTx.feePayer = new PublicKey(relayerData.address);
+    invalidTx.partialSign(userKeypair);
 
-    // Gán feePayer là ví Relayer
-    transaction.feePayer = new PublicKey(relayerData.address);
-
-    // ----------------------------------------------------
-    // BƯỚC 4: Người dùng ký phần giao dịch của mình (Partial Sign)
-    // ----------------------------------------------------
-    console.log('\n✍️  [BƯỚC 4] Người dùng thực hiện partialSign...');
-    transaction.partialSign(userKeypair);
-
-    // Serialize sang chuỗi Base64
-    const partialTransaction = transaction
+    const invalidPartialTx = invalidTx
       .serialize({ requireAllSignatures: false })
       .toString('base64');
-    console.log(`   - Đã serialize partialTransaction (${partialTransaction.length} bytes base64)`);
+
+    const rejectRes = await fetch(`${BASE_URL}/api/sponsor-tx`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ partialTransaction: invalidPartialTx }),
+    });
+
+    const rejectResult = await rejectRes.json();
+    if (rejectRes.status === 403 && !rejectResult.success) {
+      console.log('   ✅ ĐÃ CHẶN THÀNH CÔNG GIAO DỊCH LẠ (HTTP 403 Forbidden)!');
+      console.log('   - Thông báo từ Relayer:', rejectResult.error);
+      console.log('   - Mã lỗi:', rejectResult.code);
+    } else {
+      throw new Error(`Bộ lọc bảo mật thất bại! Status: ${rejectRes.status}`);
+    }
 
     // ----------------------------------------------------
-    // BƯỚC 5: Gửi request POST lên /api/sponsor-tx
+    // TEST 2: Giao dịch HỢP LỆ chứa Program ID N.E.D Identity
     // ----------------------------------------------------
-    console.log('\n📡 [BƯỚC 5] Gửi partialTransaction lên /api/sponsor-tx...');
+    console.log('\n📝 [TEST 2] Tạo giao dịch HỢP LỆ tương tác với N.E.D Identity Program...');
+    const validUser = Keypair.generate();
+
+    const identityInstruction = new TransactionInstruction({
+      programId: VALID_PROGRAM_ID,
+      keys: [
+        { pubkey: validUser.publicKey, isSigner: true, isWritable: true },
+      ],
+      data: Buffer.from([1, 0, 0, 0]), // Identity Register Instruction
+    });
+
+    const validTx = new Transaction().add(identityInstruction);
+    const { blockhash: b2 } = await connection.getLatestBlockhash('confirmed');
+    validTx.recentBlockhash = b2;
+    validTx.feePayer = new PublicKey(relayerData.address);
+
+    validTx.partialSign(validUser);
+    const validPartialTx = validTx
+      .serialize({ requireAllSignatures: false })
+      .toString('base64');
+
+    console.log('   - Gửi yêu cầu bảo trợ gas lên /api/sponsor-tx...');
     const startTime = Date.now();
     const sponsorRes = await fetch(`${BASE_URL}/api/sponsor-tx`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        partialTransaction,
-      }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ partialTransaction: validPartialTx }),
     });
 
     const duration = Date.now() - startTime;
     const sponsorResult = await sponsorRes.json();
 
     if (!sponsorRes.ok || !sponsorResult.success) {
-      console.error('\n❌ GIAO DỊCH THẤT BẠI!');
+      console.error('\n❌ GIAO DỊCH HỢP LỆ BỊ TỪ CHỐI BẤT THƯỜNG!');
       console.error(`   - HTTP Status: ${sponsorRes.status}`);
       console.error(`   - Chi tiết lỗi:`, sponsorResult);
       process.exit(1);
     }
 
-    // ----------------------------------------------------
-    // BƯỚC 6: Kết quả thành công
-    // ----------------------------------------------------
     const signature = sponsorResult.signature;
     const explorerUrl = `https://explorer.solana.com/tx/${signature}?cluster=devnet`;
 
     console.log('\n🎉 ================================================================');
-    console.log('✅ GIAO DỊCH ĐÃ ĐƯỢC TÀI TRỢ GAS VÀ BROADCAST THÀNH CÔNG!');
+    console.log('✅ GIAO DỊCH N.E.D IDENTITY ĐÃ ĐƯỢC TÀI TRỢ GAS VÀ KÝ THÀNH CÔNG!');
     console.log('================================================================');
     console.log(`⏱️  Thời gian xử lý: ${duration}ms`);
-    console.log(`🔑 Signature (Mã xác thực): ${signature}`);
+    console.log(`🔑 Signature: ${signature}`);
+    console.log(`📋 Action: ${sponsorResult.action}`);
+    console.log(`🔒 Program ID: ${sponsorResult.programId}`);
     console.log(`🔗 Solana Explorer: ${explorerUrl}`);
 
     // ----------------------------------------------------
-    // BƯỚC 7: Test bổ sung qua Helper sendSponsoredTransaction
+    // TEST 3: Kiểm thử Helper sendSponsoredTransaction
     // ----------------------------------------------------
-    console.log('\n🧪 [TEST BỔ SUNG] Kiểm tra chạy qua Helper src/lib/sponsorClient.ts...');
-    const testUser2 = Keypair.generate();
-    const tx2 = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: testUser2.publicKey,
-        toPubkey: recipientKeypair.publicKey,
-        lamports: 0,
+    console.log('\n🧪 [TEST 3] Kiểm thử Helper src/lib/sponsorClient.ts với Identity Program...');
+    const testUser3 = Keypair.generate();
+    const helperTx = new Transaction().add(
+      new TransactionInstruction({
+        programId: VALID_PROGRAM_ID,
+        keys: [{ pubkey: testUser3.publicKey, isSigner: true, isWritable: true }],
+        data: Buffer.from([1, 0, 0, 0]),
       })
     );
 
-    const helperResult = await sendSponsoredTransaction(connection, tx2, testUser2, {
+    const helperResult = await sendSponsoredTransaction(connection, helperTx, testUser3, {
       apiUrl: `${BASE_URL}/api/sponsor-tx`,
       relayerBalanceApiUrl: `${BASE_URL}/api/relayer-balance`,
     });
 
-    console.log(`✅ Helper hoạt động hoàn hảo! Signature 2: ${helperResult.signature}`);
-    console.log(`🔗 Explorer 2: ${helperResult.explorerUrl}`);
+    console.log(`✅ Helper hoạt động xuất sắc! Signature: ${helperResult.signature}`);
+    console.log(`🔗 Explorer: ${helperResult.explorerUrl}`);
     console.log('\n================================================================');
-    console.log('🎯 TẤT CẢ CÁC BƯỚC KIỂM THỬ ĐÃ THÀNH CÔNG RỰC RỠ!');
+    console.log('🎯 TẤT CẢ CÁC BƯỚC KIỂM THỬ BẢO MẬT & RELAYER ĐÃ THÀNH CÔNG RỰC RỠ!');
     console.log('================================================================');
   } catch (error: unknown) {
     const errorMsg = error instanceof Error ? error.message : String(error);
